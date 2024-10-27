@@ -2,9 +2,9 @@ import logging
 import os
 import sys
 import time
+from http import HTTPStatus
 
 from dotenv import load_dotenv
-from http import HTTPStatus
 import requests
 from telebot import TeleBot
 
@@ -29,16 +29,30 @@ HOMEWORK_VERDICTS = {
 logger = logging.getLogger(__name__)
 
 
+NO_TOKEN = (
+    'Программа принудительно остановлена. '
+    'Отсутствует обязательная переменная окружения:'
+)
+
+
 def check_tokens():
     """Проверяет доступность переменных окружения."""
-    for key in (PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, ENDPOINT):
-        if not key:
-            logging.critical(f'Переменная окружения: {key} отсутствует')
-            return False
-    return True
+    tokens_bool = True
+    if PRACTICUM_TOKEN is None:
+        tokens_bool = False
+        logging.critical('{NO_TOKEN} PRACTICUM_TOKEN')
+    if TELEGRAM_TOKEN is None:
+        tokens_bool = False
+        logging.critical('{NO_TOKEN} TELEGRAM_TOKEN')
+    if TELEGRAM_CHAT_ID is None:
+        tokens_bool = False
+        logging.critical('{NO_TOKEN} CHAT_ID')
+    return tokens_bool
 
 
 START_OF_SENDING = 'Начало отправки сообщения в Telegram: {}'
+SUCCESSFUL_SENDING = 'Удачная отправка сообщения в Telegram: {}'
+MSG_NO_SEND = 'Сообщение {} не отправлено {}'
 
 
 def send_message(bot, message):
@@ -46,16 +60,24 @@ def send_message(bot, message):
     try:
         logging.debug(START_OF_SENDING.format(message))
         bot.send_message(TELEGRAM_CHAT_ID, message)
-        logging.debug(f'Удачная отправка сообщения в Telegram: {message}')
+        logging.debug(SUCCESSFUL_SENDING.format(message))
         return True
     except Exception as error:
-        logging.exception(f'Сообщение {message} не отправлено {error}')
+        logging.exception(MSG_NO_SEND.format(message, error))
         return False
 
 
 SANDING_REQUEST = (
     'Отправка запроса к API {url};\nзаголовки: {headers};\n'
     'параметры {params}'
+)
+UNAVAILABLE_ENDPOINT = (
+    'Недоступность ендпоинта домашней работы: {}\n'
+    'Request parameters: {}'
+)
+STATUS_CODE = (
+    'HTTP response code {}\n'
+    'Request parameters: {}'
 )
 
 
@@ -75,36 +97,36 @@ def get_api_answer(timestamp):
     try:
         response = requests.get(**request_params)
     except requests.RequestException as error:
-        raise Exception(
-            f'Недоступность ендпоинта домашней работы: {error}\n'
-            f'Request parameters: {request_params}'
+        raise ValueError(
+            UNAVAILABLE_ENDPOINT.format(error, request_params)
         )
     logger.debug(SANDING_REQUEST.format(**request_params))
     if response.status_code != HTTPStatus.OK:
         raise StatusCodeException(
-            f'HTTP response code {response.status_code}\n'
-            f'Request parameters: {request_params}'
+            STATUS_CODE.format(response.status_code, request_params)
         )
-    for key in ['code', 'error']:
-        if key in response.json():
-            raise KeyError(f'Request parameters: {request_params}')
-    return response.json()
+    response_json = response.json()
+    if 'code' in response_json:
+        raise ValueError(f'"code": {response["code"]}')
+    if 'error' in response_json:
+        raise ValueError(f'"error": {response["error"]}')
+    return response_json
 
 
-WRONG_DATA_TYPE = 'Тип данных {} не соответстыует типу "dict"'
-NO_KEY = 'Отсутствует ключ homeworks в ответе'
+TYPE_DICT = 'Тип данных {} не соответстыует типу "dict"'
+NO_KEY_HOMEWORKS = 'Отсутствует ключ homeworks в ответе'
 TYPE_LIST = 'Тип данных {} под ключом "homeworks" получен не тип "list"'
 
 
 def check_response(response):
     """Проверяет ответ API на соответствие документации."""
     if not isinstance(response, dict):
-        raise TypeError(WRONG_DATA_TYPE.format(type))
+        raise TypeError(TYPE_DICT.format(type(response)))
     if 'homeworks' not in response:
-        raise KeyError(NO_KEY)
+        raise KeyError(NO_KEY_HOMEWORKS)
     homeworks = response['homeworks']
     if not isinstance(homeworks, list):
-        raise TypeError(TYPE_LIST.format(type))
+        raise TypeError(TYPE_LIST.format(type(homeworks)))
     return homeworks
 
 
@@ -114,6 +136,7 @@ UPDATE_STATUS = (
 )
 KEY_ERROR_NAME = 'No "homework_name" at homework keys.'
 KEY_ERROR_STATUS = 'No "status" at homework keys.'
+VALUE_ERROR_STATUS = 'Неожиданный статус домашней работы: {}'
 
 
 def parse_status(homework):
@@ -124,7 +147,7 @@ def parse_status(homework):
         raise KeyError(KEY_ERROR_STATUS)
     status = homework['status']
     if status not in HOMEWORK_VERDICTS:
-        raise ValueError(f'Неожиданный статус домашней работы: {status}')
+        raise ValueError(VALUE_ERROR_STATUS.format(status))
     return UPDATE_STATUS.format(
         homework['homework_name'], HOMEWORK_VERDICTS[status]
     )
@@ -137,7 +160,7 @@ FAILURE = 'Сбой в работе программы: {}.'
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
-        exit()
+        return
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
     old_status = ''
@@ -174,6 +197,4 @@ if __name__ == '__main__':
             logging.FileHandler(f'{__file__}.log')
         ]
     )
-    handler = logging.StreamHandler()
-    logger.addHandler(handler)
     main()
