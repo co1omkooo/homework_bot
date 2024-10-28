@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 import requests
 from telebot import TeleBot
 
-from exceptions import StatusCodeException
+from exceptions import StatusCodeException, DenialOfService
 
 load_dotenv()
 
@@ -29,25 +29,18 @@ HOMEWORK_VERDICTS = {
 logger = logging.getLogger(__name__)
 
 
-NO_TOKEN = (
-    'Программа принудительно остановлена. '
-    'Отсутствует обязательная переменная окружения:'
-)
-
-
 def check_tokens():
     """Проверяет доступность переменных окружения."""
     tokens_bool = True
-    if PRACTICUM_TOKEN is None:
-        tokens_bool = False
-        logging.critical('{NO_TOKEN} PRACTICUM_TOKEN')
-    if TELEGRAM_TOKEN is None:
-        tokens_bool = False
-        logging.critical('{NO_TOKEN} TELEGRAM_TOKEN')
-    if TELEGRAM_CHAT_ID is None:
-        tokens_bool = False
-        logging.critical('{NO_TOKEN} CHAT_ID')
-    return tokens_bool
+    for token, value in [
+        (PRACTICUM_TOKEN, 'PRACTICUM_TOKEN'),
+        (TELEGRAM_TOKEN, 'TELEGRAM_TOKEN'),
+        (TELEGRAM_CHAT_ID, 'TELEGRAM_CHAT_ID')
+    ]:
+        if token is None:
+            tokens_bool = False
+            logging.critical(value)
+        return tokens_bool
 
 
 START_OF_SENDING = 'Начало отправки сообщения в Telegram: {}'
@@ -79,6 +72,10 @@ STATUS_CODE = (
     'HTTP response code {}\n'
     'Request parameters: {}'
 )
+DENIAL_SERVICE = (
+    'Отказ от обслуживания - {}: {}\n'
+    'Request parameters: {}'
+)
 
 
 def get_api_answer(timestamp):
@@ -97,7 +94,7 @@ def get_api_answer(timestamp):
     try:
         response = requests.get(**request_params)
     except requests.RequestException as error:
-        raise ValueError(
+        raise ConnectionError(
             UNAVAILABLE_ENDPOINT.format(error, request_params)
         )
     logger.debug(SANDING_REQUEST.format(**request_params))
@@ -106,10 +103,11 @@ def get_api_answer(timestamp):
             STATUS_CODE.format(response.status_code, request_params)
         )
     response_json = response.json()
-    if 'code' in response_json:
-        raise ValueError(f'"code": {response["code"]}')
-    if 'error' in response_json:
-        raise ValueError(f'"error": {response["error"]}')
+    for key in ['code', 'error']:
+        if key in response_json:
+            raise DenialOfService(
+                DENIAL_SERVICE.format(key, response[key], request_params)
+            )
     return response_json
 
 
@@ -170,18 +168,16 @@ def main():
             homeworks = check_response(response)
             if homeworks:
                 new_status = parse_status(homeworks[0])
-                if new_status != old_status:
-                    if send_message(bot, new_status) is True:
-                        old_status = new_status
+                if new_status != old_status and send_message(bot, new_status):
+                    old_status = new_status
                 else:
                     logger.error(NO_NEW_STATUS)
-            timestamp = response.get('current_date', timestamp)
+                timestamp = response.get('current_date', timestamp)
         except Exception as error:
             new_status = FAILURE.format(error)
             logger.error(new_status)
-            if new_status != old_status:
-                if send_message(bot, new_status) is True:
-                    old_status = new_status
+            if new_status != old_status and send_message(bot, new_status):
+                old_status = new_status
         finally:
             time.sleep(RETRY_PERIOD)
 
