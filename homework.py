@@ -28,19 +28,21 @@ HOMEWORK_VERDICTS = {
 
 logger = logging.getLogger(__name__)
 
+NO_TOKEN = (
+    'Программа принудительно остановлена. '
+    'Отсутствует обязательная переменная окружения: {}'
+)
+tokens_name = ['PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID']
+
 
 def check_tokens():
     """Проверяет доступность переменных окружения."""
-    tokens_bool = True
-    for token, value in [
-        (PRACTICUM_TOKEN, 'PRACTICUM_TOKEN'),
-        (TELEGRAM_TOKEN, 'TELEGRAM_TOKEN'),
-        (TELEGRAM_CHAT_ID, 'TELEGRAM_CHAT_ID')
-    ]:
-        if token is None:
-            tokens_bool = False
-            logging.critical(value)
-        return tokens_bool
+    tokens = True
+    for name in tokens_name:
+        if globals()[name] is None:
+            tokens = False
+            logging.critical(NO_TOKEN.format('name'))
+        return tokens
 
 
 START_OF_SENDING = 'Начало отправки сообщения в Telegram: {}'
@@ -170,9 +172,9 @@ def main():
                 new_status = parse_status(homeworks[0])
                 if new_status != old_status and send_message(bot, new_status):
                     old_status = new_status
+                    timestamp = response.get('current_date', timestamp)
                 else:
                     logger.error(NO_NEW_STATUS)
-                timestamp = response.get('current_date', timestamp)
         except Exception as error:
             new_status = FAILURE.format(error)
             logger.error(new_status)
