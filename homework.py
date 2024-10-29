@@ -32,17 +32,17 @@ NO_TOKEN = (
     'Программа принудительно остановлена. '
     'Отсутствует обязательная переменная окружения: {}'
 )
-tokens_name = ['PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID']
+NAMES = ['PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID']
 
 
 def check_tokens():
     """Проверяет доступность переменных окружения."""
     tokens = True
-    for name in tokens_name:
+    for name in NAMES:
         if globals()[name] is None:
             tokens = False
-            logging.critical(NO_TOKEN.format('name'))
-        return tokens
+            logging.critical(NO_TOKEN.format(name))
+    return tokens
 
 
 START_OF_SENDING = 'Начало отправки сообщения в Telegram: {}'
